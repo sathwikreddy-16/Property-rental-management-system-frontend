@@ -221,7 +221,7 @@ export default function App() {
     const reader = new FileReader(); reader.onload = () => setForm(prev => ({ ...prev, imageUrl: String(reader.result) })); reader.readAsDataURL(file)
   }
 
-  if (!user && !['/Act', '/discover', '/'].includes(path)) return <LoginPage {...{ authMode, setAuthMode, authRole, setAuthRole, authForm, setAuthForm, authError, showPassword, setShowPassword, submitAuth, demoSocial, go }} />
+  if (!user && !['/Act', '/discover', '/'].includes(path)) return <LoginPage {...{ authMode, setAuthMode, authRole, setAuthRole, authForm, setAuthForm, authError, showPassword, setShowPassword, submitAuth, go }} />
 
   const navItems = role === 'tenant'
     ? [{ id: 'dashboard', label: 'My home', icon: LayoutDashboard }, { id: 'discover', label: 'Find a home', icon: Search }, { id: 'applications', label: 'My applications', icon: ClipboardList }, { id: 'messages', label: 'Messages', icon: MessageCircle }]
