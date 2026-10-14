@@ -9,7 +9,7 @@ import {
 import { useAuth } from './AuthContext.jsx'
 
 const API = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api').replace(/\/$/, '')
-const STORE = { properties: 'haven.properties.v1', applications: 'haven.applications.v1', messages: 'haven.messages.v1', notifications: 'haven.notifications.v1', expenses: 'haven.expenses.v1' }
+const STORE = { properties: 'haven.properties.v1', applications: 'haven.applications.v1', notifications: 'haven.notifications.v1', expenses: 'haven.expenses.v1' }
 const photos = [
   'https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=1000&q=85',
   'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1000&q=85',
@@ -32,11 +32,6 @@ const seedNotifications = [
   { id: 2, title: 'Maintenance update', detail: 'Garden Court maintenance is scheduled for Friday.', kind: 'maintenance', read: false, time: '1 hour ago' },
   { id: 3, title: 'New message', detail: 'Meera sent you a message about Palm House.', kind: 'message', read: true, time: 'Yesterday' },
 ]
-const seedMessages = [
-  { id: 'c1', name: 'Meera Nair', property: 'Palm House', initials: 'MN', online: true, messages: [{ from: 'them', text: 'Hi! Could you share a little more about the move-in date?', time: '10:42 AM' }, { from: 'me', text: 'Of course — the home is ready from the 1st of next month.', time: '10:45 AM' }, { from: 'them', text: 'That works perfectly. I’ll send my application this afternoon.', time: '10:47 AM' }] },
-  { id: 'c2', name: 'Kabir Shah', property: 'The Willow Residence', initials: 'KS', online: false, messages: [{ from: 'them', text: 'Thank you for arranging the viewing. The apartment is lovely.', time: 'Yesterday' }] },
-  { id: 'c3', name: 'Sana Iyer', property: 'The Olive Studio', initials: 'SI', online: true, messages: [{ from: 'them', text: 'Is parking included with the lease?', time: 'Mon' }] },
-]
 const money = (value) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(Number(value || 0))
 const readStore = (key, fallback) => { try { const stored = localStorage.getItem(key); return stored ? JSON.parse(stored) : fallback } catch { return fallback } }
 const roleHome = { tenant: '/tenant', landlord: '/landlord', admin: '/admin' }
@@ -53,7 +48,7 @@ export default function App() {
     ? [{ id: 'tenant-demo', applicantName: user.name, email: user.email, propertyTitle: 'The Willow Residence', status: 'APPROVED', appliedAt: 'Oct 01' }]
     : readStore(STORE.applications, seedApplications))
   const [notifications, setNotifications] = useState(() => readStore(STORE.notifications, seedNotifications))
-  const [messages, setMessages] = useState(() => readStore(STORE.messages, seedMessages))
+  const [messages, setMessages] = useState([])
   const [expenses, setExpenses] = useState(() => readStore(STORE.expenses, [{ id: 1, label: 'Plumbing repair', category: 'Repairs', amount: 6800, date: 'Oct 12' }, { id: 2, label: 'Property tax', category: 'Taxes', amount: 12400, date: 'Oct 09' }, { id: 3, label: 'Common utilities', category: 'Utilities', amount: 3850, date: 'Oct 06' }]))
   const [activeChat, setActiveChat] = useState('c1')
   const [query, setQuery] = useState('')
@@ -68,7 +63,7 @@ export default function App() {
   const [form, setForm] = useState({ title: '', location: '', city: 'Hyderabad', propertyType: 'Apartment', monthlyRent: '', bedrooms: 2, bathrooms: 1, description: '', imageUrl: '', available: true })
   const [authMode, setAuthMode] = useState('signin')
   const [authRole, setAuthRole] = useState('tenant')
-  const [authForm, setAuthForm] = useState({ name: '', email: '', password: '' })
+  const [authForm, setAuthForm] = useState({ name: '', email: '', password: '', adminCode: '' })
   const [authError, setAuthError] = useState('')
   const [messageDraft, setMessageDraft] = useState('')
   const [expenseForm, setExpenseForm] = useState({ label: '', category: 'Repairs', amount: '' })
@@ -82,7 +77,6 @@ export default function App() {
   useEffect(() => { localStorage.setItem(STORE.properties, JSON.stringify(properties)) }, [properties])
   useEffect(() => { if (role !== 'tenant') localStorage.setItem(STORE.applications, JSON.stringify(applications)) }, [applications, role])
   useEffect(() => { localStorage.setItem(STORE.notifications, JSON.stringify(notifications)) }, [notifications])
-  useEffect(() => { localStorage.setItem(STORE.messages, JSON.stringify(messages)) }, [messages])
   useEffect(() => { localStorage.setItem(STORE.expenses, JSON.stringify(expenses)) }, [expenses])
   useEffect(() => { if (!notice) return; const timer = setTimeout(() => setNotice(''), 3600); return () => clearTimeout(timer) }, [notice])
   useEffect(() => {
@@ -113,7 +107,7 @@ export default function App() {
 
   async function loadProperties() {
     try {
-      const [pRes, aRes] = await Promise.all([fetch(`${API}/properties`), role === 'tenant' ? Promise.resolve(null) : fetch(`${API}/applications`)] )
+      const [pRes, aRes] = await Promise.all([fetch(`${API}/properties`), role === 'tenant' ? Promise.resolve(null) : fetch(`${API}/applications`, { headers: { Authorization: `Bearer ${user.token}` } })] )
       if (!pRes.ok) throw new Error('API unavailable')
       const list = await pRes.json()
       const localProperties = readStore(STORE.properties, [])
@@ -128,18 +122,42 @@ export default function App() {
       }
     } catch { setOnline(false) }
   }
-  useEffect(() => { if (user) loadProperties() }, [user])
+  useEffect(() => {
+    if (!user) return
+    loadProperties()
+    let active = true
+    const refreshMessages = () => fetch(`${API}/messages/conversations`, { headers: { Authorization: `Bearer ${user.token}` } })
+      .then(response => response.ok ? response.json() : Promise.reject())
+      .then(threads => { if (active) setMessages(threads.map(thread => ({
+        id: thread.id, email: thread.email, name: thread.name, property: thread.property,
+        initials: thread.name.split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase(), online: false,
+        messages: thread.messages.map(message => ({ id: message.id, from: message.from, text: message.text, time: new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) })),
+      }))) })
+      .catch(() => {})
+    refreshMessages()
+    const timer = page === 'messages' ? setInterval(refreshMessages, 5000) : null
+    return () => { active = false; if (timer) clearInterval(timer) }
+  }, [user, page])
 
-  function submitAuth(event) {
+  async function submitAuth(event) {
     event.preventDefault(); setAuthError('')
     if (!authForm.email.includes('@')) return setAuthError('Enter a valid email address to continue.')
-    if (authForm.password.length < 4) return setAuthError('Use at least 4 characters for this demo sign-in.')
-    signIn({ ...authForm, role: authRole })
-    go(roleHome[authRole])
-    setNotice(`Welcome to Haven, ${authForm.name || authForm.email.split('@')[0]}.`)
+    if (authMode === 'signup' && authForm.password.length < 8) return setAuthError('Use at least 8 characters for your password.')
+    try {
+      const response = await fetch(`${API}/auth/${authMode === 'signup' ? 'signup' : 'login'}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(authMode === 'signup'
+          ? { name: authForm.name, email: authForm.email, password: authForm.password, role: authRole, adminCode: authForm.adminCode }
+          : { email: authForm.email, password: authForm.password, role: authRole }),
+      })
+      const result = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(result.message || 'Unable to authenticate. Check your details and try again.')
+      signIn(result)
+      go(roleHome[result.user.role])
+      setNotice(`Welcome to Haven, ${result.user.name}.`)
+    } catch (error) { setAuthError(error.message || 'Could not reach the Haven server. Please try again.') }
   }
-  function demoSocial(provider) { signIn({ name: `${roleName[authRole]} demo`, email: `${authRole}@haven.demo`, role: authRole }); go(roleHome[authRole]); setNotice(`Signed in with ${provider} demo.`) }
-  function logout() { signOut(); go('/login') }
+  function logout() { if (user?.token) fetch(`${API}/auth/logout`, { method: 'POST', headers: { Authorization: `Bearer ${user.token}` } }).catch(() => {}); signOut(); go('/login') }
   function requireRole(allowed) {
     if (!user) { go('/login'); return false }
     if (!allowed.includes(role)) { go(roleHome[role]); setNotice(`That page is for ${allowed.map(r => roleName[r]).join(' or ')} accounts.`); return false }
@@ -153,11 +171,11 @@ export default function App() {
     const apiPayload = { ...payload, imageUrl: payload.imageUrl?.startsWith('data:') ? '' : payload.imageUrl }
     try {
       if (editing && !String(editing.id).startsWith('demo-') && !String(editing.id).startsWith('local-')) {
-        const response = await fetch(`${API}/properties/${editing.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(apiPayload) })
+        const response = await fetch(`${API}/properties/${editing.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${user.token}` }, body: JSON.stringify(apiPayload) })
         if (!response.ok) throw new Error('Unable to update listing')
         const saved = await response.json(); setProperties(prev => prev.map(p => p.id === editing.id ? { ...saved, imageUrl: payload.imageUrl || saved.imageUrl, status: payload.status } : p)); setOnline(true)
       } else if (!editing) {
-        const response = await fetch(`${API}/properties`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(apiPayload) })
+        const response = await fetch(`${API}/properties`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${user.token}` }, body: JSON.stringify(apiPayload) })
         if (!response.ok) throw new Error('Backend is offline')
         const saved = await response.json(); setProperties(prev => [{ ...saved, imageUrl: payload.imageUrl || saved.imageUrl, status: payload.status }, ...prev]); setOnline(true)
       } else setProperties(prev => prev.map(p => p.id === editing.id ? { ...payload, id: editing.id } : p))
@@ -171,16 +189,29 @@ export default function App() {
   }
   async function changeApplication(app, status) {
     try {
-      const response = await fetch(`${API}/applications/${app.id}/status?status=${status}`, { method: 'PATCH' })
+      const response = await fetch(`${API}/applications/${app.id}/status?status=${status}`, { method: 'PATCH', headers: { Authorization: `Bearer ${user.token}` } })
       if (!response.ok) throw new Error()
       const saved = await response.json(); setApplications(prev => prev.map(a => a.id === app.id ? saved : a)); setOnline(true)
     } catch { setApplications(prev => prev.map(a => a.id === app.id ? { ...a, status } : a)) }
     setNotice(`Application moved to ${status === 'CHECKING' ? 'background check' : status.toLowerCase()}.`)
   }
-  function sendMessage(event) {
-    event.preventDefault(); if (!messageDraft.trim() || !activeConversation) return
-    setMessages(prev => prev.map(chat => chat.id === activeChat ? { ...chat, messages: [...chat.messages, { id: Date.now(), from: 'me', text: messageDraft.trim(), time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }] } : chat))
-    setMessageDraft('')
+  async function sendMessage(event) {
+    event.preventDefault(); if (!messageDraft.trim() || !activeConversation || !user?.token) return
+    try {
+      const response = await fetch(`${API}/messages`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${user.token}` }, body: JSON.stringify({ recipientEmail: activeConversation.email, propertyTitle: activeConversation.property || 'Rental enquiry', text: messageDraft.trim() }) })
+      const result = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(result.message || 'Unable to send message.')
+      setMessages(prev => prev.map(chat => chat.id === activeChat ? { ...chat, messages: [...chat.messages, { id: result.id, from: 'me', text: result.body, time: new Date(result.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }] } : chat))
+      setMessageDraft('')
+    } catch (error) { setNotice(error.message || 'Could not send message. Please try again.') }
+  }
+  function startConversation(email) {
+    const normalized = email.trim().toLowerCase()
+    if (!normalized.includes('@') || normalized === user?.email.toLowerCase()) return setNotice('Enter the email address of a tenant or landlord account.')
+    const existing = messages.find(chat => chat.email?.toLowerCase() === normalized)
+    if (existing) { setActiveChat(existing.id); return }
+    const contact = { id: normalized, email: normalized, name: normalized, property: 'Rental enquiry', initials: normalized[0].toUpperCase(), online: false, messages: [] }
+    setMessages(prev => [contact, ...prev]); setActiveChat(contact.id)
   }
   function markRead() { setNotifications(prev => prev.map(item => ({ ...item, read: true }))); setNotice('All notifications marked as read.') }
   function addExpense(event) { event.preventDefault(); setExpenses(prev => [{ ...expenseForm, amount: Number(expenseForm.amount), date: 'Today', id: Date.now() }, ...prev]); setExpenseForm({ label: '', category: 'Repairs', amount: '' }); setModal(''); setNotice('Expense added to your ledger.') }
@@ -224,7 +255,7 @@ export default function App() {
         {page === 'properties' && <PropertiesPage {...{ properties, setProperties, setModal, setEditing, setForm, setNotice }} />}
         {page === 'applications' && <ApplicationsPage {...{ role, applications, changeApplication, goNav }} />}
         {page === 'finances' && <FinancesPage {...{ expenses, setModal, setNotice, properties }} />}
-        {page === 'messages' && <MessagesPage {...{ messages, activeChat, setActiveChat, activeConversation, messageDraft, setMessageDraft, sendMessage, role }} />}
+        {page === 'messages' && <MessagesPage {...{ messages, activeChat, setActiveChat, activeConversation, messageDraft, setMessageDraft, sendMessage, startConversation, role }} />}
         {page === 'users' && <UsersPage {...{ setNotice }} />}
       </div>
       <footer className="footer"><span>© 2026 Haven Rental Platform</span><span>Good homes. Clearer days. <span>✳</span></span></footer>
@@ -275,8 +306,9 @@ function FinancesPage({ expenses, setModal, setNotice, properties }) {
   return <section className="dashboard-page"><PageHeading eyebrow="RENT & EXPENSES" title={<>Know where every <i>rupee goes.</i></>} subtitle="A clear monthly view of your rental income and costs." action={<button className="btn-primary" onClick={() => setModal('expense')}><Plus size={16}/> Log expense</button>}/><div className="finance-banner"><div><span className="finance-icon"><Wallet size={19}/></span><small>NET RENTAL INCOME · OCTOBER 2026</small><b>{money(totalCollected - totalExpenses)}</b><span className="positive"><ArrowUpRight size={13}/> 8.4% from last month</span></div><div className="finance-banner-right"><span>Portfolio performance</span><strong>{Math.max(0, 100 - Math.round(totalExpenses / Math.max(totalCollected, 1) * 100))}%</strong><div className="progress-track"><i style={{ width: `${Math.max(0, 100 - Math.round(totalExpenses / Math.max(totalCollected, 1) * 100))}%` }}/></div><small>Rent retained after expenses</small></div></div><div className="stat-grid three"><Metric icon={CircleDollarSign} label="Rent collected" value={money(totalCollected)} tone="sage" note="4 payments received"/><Metric icon={Clock3} label="Pending rent" value="₹32,000" tone="amber" note="Due Nov 1"/><Metric icon={ArrowDownRight} label="Expenses" value={money(totalExpenses)} tone="rose" note={`${expenses.length} logged this month`}/></div><div className="two-col"><section className="surface-card expense-breakdown"><CardHeading title="Expense breakdown" detail="By category this month" action={<button className="bare-link" onClick={() => setPeriod(period === 'This month' ? 'Last month' : 'This month')}>{period} <ChevronDown size={13}/></button>}/>{totals.map((item, index) => <div className="category-row" key={item.category}><span className={`category-icon cat-${index}`}><span>{index === 0 ? <Wrench size={16}/> : index === 1 ? <FileText size={16}/> : <Activity size={16}/>}</span></span><div><b>{item.category}</b><small>{expenses.filter(e => e.category === item.category).length} recorded entries</small></div><strong>{money(item.total)}</strong></div>)}<div className="expense-total"><span>Total expenses</span><b>{money(totalExpenses)}</b></div></section><section className="surface-card"><CardHeading title="Recent expenses" detail="Your latest outgoings" action={<button className="bare-link" onClick={() => setNotice('Showing all expense records.')}>View all <ArrowRight size={13}/></button>}/>{expenses.slice(0, 5).map(expense => <div className="expense-row" key={expense.id}><span className="expense-bullet"><ArrowDownRight size={15}/></span><div><b>{expense.label}</b><small>{expense.category} · {expense.date}</small></div><strong>−{money(expense.amount)}</strong></div>)}{expenses.length === 0 && <Empty icon={Wallet} title="No expenses logged" detail="Your property costs will appear here."/>}</section></div><div className="info-note"><CircleHelp size={16}/><span>Rent totals and expense entries in this view are a local finance preview. Connect a payment and ledger API for live financial records.</span></div></section>
 }
 
-function MessagesPage({ messages, activeChat, setActiveChat, activeConversation, messageDraft, setMessageDraft, sendMessage, role }) {
-  return <section className="dashboard-page messages-page"><PageHeading eyebrow="HAVEN MESSAGES" title={<>A little more <i>in sync.</i></>} subtitle="Keep the conversation around your home in one place."/><div className="chat-shell"><aside className="chat-contacts"><div className="chat-list-heading"><b>Messages</b><span>{messages.length}</span></div><div className="chat-search"><Search size={15}/><input placeholder="Search conversations"/></div>{messages.map(chat => <button key={chat.id} className={`contact-row ${activeChat === chat.id ? 'active' : ''}`} onClick={() => setActiveChat(chat.id)}><span className="contact-avatar">{chat.initials}{chat.online && <i/>}</span><span className="contact-details"><b>{chat.name}</b><small>{chat.messages[chat.messages.length - 1]?.text}</small></span><span className="contact-meta"><small>{chat.messages[chat.messages.length - 1]?.time}</small></span></button>)}{messages.length === 0 && <Empty icon={MessageCircle} title="No conversations yet" detail="Start by connecting with a tenant or landlord."/>}</aside><section className="chat-main">{activeConversation ? <><div className="chat-header"><span className="contact-avatar">{activeConversation.initials}{activeConversation.online && <i/>}</span><div><b>{activeConversation.name}</b><small><span/> {activeConversation.online ? 'Online now' : 'Usually replies quickly'}</small></div><button className="bare-icon" aria-label="Conversation details"><MoreHorizontal size={19}/></button></div><div className="chat-context"><span className="soft-icon sage"><Home size={15}/></span><span><small>CONVERSATION ABOUT</small><b>{activeConversation.property}</b></span><button className="bare-link">View property <ArrowUpRight size={13}/></button></div><div className="message-thread"><div className="day-divider"><span>Today</span></div>{activeConversation.messages.map(message => <div key={message.id || message.time + message.text} className={`message-line ${message.from === 'me' ? 'mine' : ''}`}><div className="message-bubble">{message.text}<small>{message.time}</small></div></div>)}</div><form className="message-composer" onSubmit={sendMessage}><input value={messageDraft} onChange={e => setMessageDraft(e.target.value)} placeholder="Write a message…"/><span className="composer-hint">Enter to send</span><button className="send-button" type="submit" aria-label="Send message"><Send size={16}/></button></form></> : <Empty icon={MessageCircle} title="Choose a conversation" detail="Select a contact to see your messages."/>}</section></div><div className="info-note"><ShieldCheck size={16}/><span>Messages are saved in this browser preview. Connect a messaging service to enable live delivery between accounts.</span></div></section>
+function MessagesPage({ messages, activeChat, setActiveChat, activeConversation, messageDraft, setMessageDraft, sendMessage, startConversation }) {
+  const [recipient, setRecipient] = useState('')
+  return <section className="dashboard-page messages-page"><PageHeading eyebrow="HAVEN MESSAGES" title={<>A little more <i>in sync.</i></>} subtitle="Keep the conversation around your home in one place."/><div className="chat-shell"><aside className="chat-contacts"><div className="chat-list-heading"><b>Messages</b><span>{messages.length}</span></div><form className="chat-search" onSubmit={e => { e.preventDefault(); startConversation(recipient); setRecipient('') }}><Search size={15}/><input aria-label="Start a conversation by email" placeholder="Tenant or landlord email" type="email" value={recipient} onChange={e => setRecipient(e.target.value)}/><button type="submit" className="bare-link">Start</button></form>{messages.map(chat => <button key={chat.id} className={`contact-row ${activeChat === chat.id ? 'active' : ''}`} onClick={() => setActiveChat(chat.id)}><span className="contact-avatar">{chat.initials}{chat.online && <i/>}</span><span className="contact-details"><b>{chat.name}</b><small>{chat.messages[chat.messages.length - 1]?.text || chat.email}</small></span><span className="contact-meta"><small>{chat.messages[chat.messages.length - 1]?.time}</small></span></button>)}{messages.length === 0 && <Empty icon={MessageCircle} title="No conversations yet" detail="Enter a tenant or landlord account email above to start a conversation."/>}</aside><section className="chat-main">{activeConversation ? <><div className="chat-header"><span className="contact-avatar">{activeConversation.initials}{activeConversation.online && <i/>}</span><div><b>{activeConversation.name}</b><small><span/> {activeConversation.online ? 'Online now' : activeConversation.email}</small></div><button className="bare-icon" aria-label="Conversation details"><MoreHorizontal size={19}/></button></div><div className="chat-context"><span className="soft-icon sage"><Home size={15}/></span><span><small>CONVERSATION ABOUT</small><b>{activeConversation.property}</b></span></div><div className="message-thread">{activeConversation.messages.length === 0 ? <Empty icon={MessageCircle} title="Say hello" detail="Your message will be delivered to this account."/> : activeConversation.messages.map(message => <div key={message.id || message.time + message.text} className={`message-line ${message.from === 'me' ? 'mine' : ''}`}><div className="message-bubble">{message.text}<small>{message.time}</small></div></div>)}</div><form className="message-composer" onSubmit={sendMessage}><input value={messageDraft} onChange={e => setMessageDraft(e.target.value)} placeholder="Write a message…"/><span className="composer-hint">Enter to send</span><button className="send-button" type="submit" aria-label="Send message"><Send size={16}/></button></form></> : <Empty icon={MessageCircle} title="Choose a conversation" detail="Select a contact to see your messages."/>}</section></div><div className="info-note"><ShieldCheck size={16}/><span>Messages are saved to the Haven database and can be exchanged between tenant and landlord accounts.</span></div></section>
 }
 
 function UsersPage({ setNotice }) {
@@ -285,7 +317,7 @@ function UsersPage({ setNotice }) {
 }
 
 function LoginPage({ authMode, setAuthMode, authRole, setAuthRole, authForm, setAuthForm, authError, showPassword, setShowPassword, submitAuth, demoSocial, go }) {
-  return <div className="auth-layout"><section className="auth-story"><div className="auth-brand"><span className="brand-mark"><House size={19}/></span><b>haven<span>.</span></b></div><div className="auth-story-copy"><span className="eyebrow">RENTAL LIVING, REIMAGINED</span><h1>A better home<br/>for <i>what’s next.</i></h1><p>A calmer way to find a place, care for it, and feel at home.</p><div className="auth-quote"><div className="quote-stars">★★★★★</div><p>“Everything about finding my new home felt lighter. The whole process just made sense.”</p><div className="quote-person"><span className="person-avatar">MN</span><span><b>Meera Nair</b><small>Haven tenant since 2025</small></span></div></div></div><div className="auth-story-footer"><span>Thoughtful homes. Clearer days.</span><span>© 2026 Haven</span></div></section><section className="auth-panel"><div className="auth-panel-top"><button className="bare-link" onClick={() => go('/Act')}><ArrowRight className="back-arrow" size={14}/> Browse homes</button><div className="auth-mobile-brand"><span className="brand-mark"><House size={17}/></span><b>haven<span>.</span></b></div><span>Need help? <button className="bare-link" onClick={() => {}}>Contact us</button></span></div><div className="auth-card"><div className="auth-tabs"><button className={authMode === 'signin' ? 'selected' : ''} onClick={() => setAuthMode('signin')}>Sign in</button><button className={authMode === 'signup' ? 'selected' : ''} onClick={() => setAuthMode('signup')}>Create account</button></div><div className="auth-heading"><span className="eyebrow">WELCOME TO HAVEN</span><h2>{authMode === 'signin' ? 'Good to have you back.' : 'Let’s find your place.'}</h2><p>{authMode === 'signin' ? 'Sign in to your account to pick up where you left off.' : 'Create your account and make yourself at home.'}</p></div><form className="auth-form" onSubmit={submitAuth}>{authMode === 'signup' && <label>Your name<input required value={authForm.name} onChange={e => setAuthForm({ ...authForm, name: e.target.value })} placeholder="Your full name" autoComplete="name"/></label>}<label>Email address<input required type="email" value={authForm.email} onChange={e => setAuthForm({ ...authForm, email: e.target.value })} placeholder="you@example.com" autoComplete="email"/></label><label>Password<div className="password-input"><input required type={showPassword ? 'text' : 'password'} value={authForm.password} onChange={e => setAuthForm({ ...authForm, password: e.target.value })} placeholder="At least 4 characters" autoComplete={authMode === 'signin' ? 'current-password' : 'new-password'}/><button type="button" onClick={() => setShowPassword(!showPassword)} aria-label="Toggle password visibility">{showPassword ? <EyeOff size={16}/> : <Eye size={16}/>}</button></div></label><div className="role-select-label"><span>Your account type</span><small>Choose the view that fits you</small></div><div className="role-options">{['tenant', 'landlord', 'admin'].map(item => <button type="button" key={item} className={authRole === item ? 'selected' : ''} onClick={() => setAuthRole(item)}><span className="role-icon">{item === 'tenant' ? <KeyRound size={16}/> : item === 'landlord' ? <Building2 size={16}/> : <ShieldCheck size={16}/>}</span><span><b>{roleName[item]}</b><small>{item === 'tenant' ? 'Find and manage your home' : item === 'landlord' ? 'Manage your properties' : 'Manage the platform'}</small></span>{authRole === item && <span className="role-check"><Check size={12}/></span>}</button>)}</div>{authError && <div className="auth-error">{authError}</div>}<button className="btn-primary auth-submit" type="submit">{authMode === 'signin' ? 'Sign in to Haven' : 'Create your account'} <ArrowRight size={16}/></button></form><div className="auth-divider"><span/>or continue with<span/></div><div className="social-buttons"><button onClick={() => demoSocial('Google')}><b className="google-g">G</b>Google</button><button onClick={() => demoSocial('Apple')}><b className="apple-mark">●</b>Apple</button></div><p className="auth-legal">By continuing, you agree to Haven’s <button>Terms</button> and <button>Privacy Policy</button>.</p><div className="demo-hint"><Sparkles size={14}/><span>Preview mode: use any email and a password of 4+ characters to explore each role.</span></div></div><div className="auth-panel-footer">Secure sign-in <span>·</span> Your home, your way</div></section></div>
+  return <div className="auth-layout"><section className="auth-story"><div className="auth-brand"><span className="brand-mark"><House size={19}/></span><b>haven<span>.</span></b></div><div className="auth-story-copy"><span className="eyebrow">RENTAL LIVING, REIMAGINED</span><h1>A better home<br/>for <i>what’s next.</i></h1><p>A calmer way to find a place, care for it, and feel at home.</p><div className="auth-quote"><div className="quote-stars">★★★★★</div><p>“Everything about finding my new home felt lighter. The whole process just made sense.”</p><div className="quote-person"><span className="person-avatar">MN</span><span><b>Meera Nair</b><small>Haven tenant since 2025</small></span></div></div></div><div className="auth-story-footer"><span>Thoughtful homes. Clearer days.</span><span>© 2026 Haven</span></div></section><section className="auth-panel"><div className="auth-panel-top"><button className="bare-link" onClick={() => go('/Act')}><ArrowRight className="back-arrow" size={14}/> Browse homes</button><div className="auth-mobile-brand"><span className="brand-mark"><House size={17}/></span><b>haven<span>.</span></b></div><span>Need help? <button className="bare-link" onClick={() => {}}>Contact us</button></span></div><div className="auth-card"><div className="auth-tabs"><button className={authMode === 'signin' ? 'selected' : ''} onClick={() => setAuthMode('signin')}>Sign in</button><button className={authMode === 'signup' ? 'selected' : ''} onClick={() => setAuthMode('signup')}>Create account</button></div><div className="auth-heading"><span className="eyebrow">WELCOME TO HAVEN</span><h2>{authMode === 'signin' ? 'Good to have you back.' : 'Let’s find your place.'}</h2><p>{authMode === 'signin' ? 'Sign in to your account to pick up where you left off.' : 'Create your account and make yourself at home.'}</p></div><form className="auth-form" onSubmit={submitAuth}>{authMode === 'signup' && <label>Your name<input required value={authForm.name} onChange={e => setAuthForm({ ...authForm, name: e.target.value })} placeholder="Your full name" autoComplete="name"/></label>}<label>Email address<input required type="email" value={authForm.email} onChange={e => setAuthForm({ ...authForm, email: e.target.value })} placeholder="you@example.com" autoComplete="email"/></label><label>Password<div className="password-input"><input required type={showPassword ? 'text' : 'password'} value={authForm.password} onChange={e => setAuthForm({ ...authForm, password: e.target.value })} placeholder="At least 8 characters" autoComplete={authMode === 'signin' ? 'current-password' : 'new-password'}/><button type="button" onClick={() => setShowPassword(!showPassword)} aria-label="Toggle password visibility">{showPassword ? <EyeOff size={16}/> : <Eye size={16}/>}</button></div></label><div className="role-select-label"><span>Your account type</span><small>Choose the view that fits you</small></div><div className="role-options">{['tenant', 'landlord', 'admin'].map(item => <button type="button" key={item} className={authRole === item ? 'selected' : ''} onClick={() => setAuthRole(item)}><span className="role-icon">{item === 'tenant' ? <KeyRound size={16}/> : item === 'landlord' ? <Building2 size={16}/> : <ShieldCheck size={16}/>}</span><span><b>{roleName[item]}</b><small>{item === 'tenant' ? 'Find and manage your home' : item === 'landlord' ? 'Manage your properties' : 'Manage the platform'}</small></span>{authRole === item && <span className="role-check"><Check size={12}/></span>}</button>)}</div>{authMode === "signup" && authRole === "admin" && <label>Administrator signup code<input required value={authForm.adminCode} onChange={e => setAuthForm({ ...authForm, adminCode: e.target.value })} autoComplete="off"/></label>}{authError && <div className="auth-error">{authError}</div>}<button className="btn-primary auth-submit" type="submit">{authMode === 'signin' ? 'Sign in to Haven' : 'Create your account'} <ArrowRight size={16}/></button></form><p className="auth-legal">By continuing, you agree to Haven’s <button>Terms</button> and <button>Privacy Policy</button>.</p><div className="demo-hint"><Sparkles size={14}/><span>Tenant and landlord accounts can register here. Admin signup needs an administrator code.</span></div></div><div className="auth-panel-footer">Secure sign-in <span>·</span> Your home, your way</div></section></div>
 }
 
 function PageHeading({ eyebrow, title, subtitle, action }) { return <div className="page-heading"><div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p>{subtitle}</p></div>{action}</div> }
@@ -300,4 +332,5 @@ function PropertyCard({ property, onClick, index = 0 }) { const status = propert
 function PropertyTable({ properties, actions }) { return <div className="responsive-table"><table className="data-table"><thead><tr><th>PROPERTY</th><th>STATUS</th><th>MONTHLY RENT</th><th>TYPE</th><th/></tr></thead><tbody>{properties.map(p => <tr key={p.id}><td><div className="table-property"><img src={p.imageUrl || photos[0]} alt=""/><span><b>{p.title}</b><small>{p.location}, {p.city}</small></span></div></td><td><span className={`status-pill ${(p.status || (p.available ? 'Available' : 'Occupied')) === 'Available' ? 'status-approved' : p.status === 'Under Maintenance' ? 'status-pending' : 'status-occupied'}`}><i/>{p.status || (p.available ? 'Available' : 'Occupied')}</span></td><td className="rent-cell">{money(p.monthlyRent)}</td><td>{p.propertyType || 'Home'}</td><td>{actions ? actions(p) : <button className="bare-icon" aria-label="Open property"><ArrowUpRight size={15}/></button>}</td></tr>)}</tbody></table></div> }
 function MiniChart() { return <div className="chart-wrap"><div className="chart-y-labels"><span>₹1.5L</span><span>₹1.0L</span><span>₹50k</span><span>₹0</span></div><div className="chart-area"><div className="chart-grid"><i/><i/><i/><i/></div><svg viewBox="0 0 600 150" preserveAspectRatio="none" role="img" aria-label="Rental activity trend"><defs><linearGradient id="chartFill" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#9db69a" stopOpacity=".23"/><stop offset="100%" stopColor="#9db69a" stopOpacity="0"/></linearGradient></defs><path className="chart-fill" d="M0 112 C45 105 55 88 100 96 S160 75 200 80 S260 64 300 74 S360 39 400 52 S460 68 500 34 S560 41 600 15 V150 H0Z"/><path className="chart-line" d="M0 112 C45 105 55 88 100 96 S160 75 200 80 S260 64 300 74 S360 39 400 52 S460 68 500 34 S560 41 600 15"/><path className="chart-line secondary" d="M0 128 C45 122 55 110 100 117 S160 100 200 110 S260 94 300 103 S360 85 400 91 S460 100 500 77 S560 87 600 64"/></svg><div className="chart-x-labels"><span>Oct 01</span><span>Oct 05</span><span>Oct 10</span><span>Oct 15</span><span>Oct 20</span><span>Oct 25</span><span>Oct 31</span></div></div></div> }
 function Empty({ icon: Icon, title, detail, action }) { return <div className="empty-state"><span><Icon size={21}/></span><h3>{title}</h3><p>{detail}</p>{action}</div> }
+
 

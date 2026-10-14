@@ -1,7 +1,7 @@
 import { createContext, useContext, useMemo, useState } from 'react'
 
 const AuthContext = createContext(null)
-const KEY = 'haven.session.v1'
+const KEY = 'haven.session.v2'
 
 function readSession() {
   try { return JSON.parse(localStorage.getItem(KEY) || 'null') } catch { return null }
@@ -10,7 +10,7 @@ function readSession() {
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(readSession)
   const signIn = (details) => {
-    const next = { name: details.name || details.email?.split('@')[0] || 'Haven member', email: details.email || '', role: details.role || 'tenant' }
+    const next = { name: details.user.name, email: details.user.email, role: details.user.role, token: details.token }
     localStorage.setItem(KEY, JSON.stringify(next))
     setUser(next)
     return next
@@ -25,3 +25,4 @@ export function useAuth() {
   if (!value) throw new Error('useAuth must be used inside AuthProvider')
   return value
 }
+

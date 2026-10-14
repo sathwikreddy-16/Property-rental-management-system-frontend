@@ -9,14 +9,14 @@ This Vite + React frontend adds tenant, landlord, and admin workspaces to the Pr
 3. Copy `.env.example` to `.env.local` and set `VITE_API_BASE_URL` to your backend URL followed by `/api`. For local Spring Boot, use `http://localhost:8080/api`.
 4. Run `npm run dev` and open the local URL printed by Vite.
 
-Without a reachable API, Haven uses sample data and browser storage so the screens can still be explored. Sample sign-in accepts any email address and a password with four or more characters. Choose Tenant, Landlord, or Admin on the sign-in screen.
+Authentication requires a reachable backend and MySQL database. Tenant and landlord accounts can register directly; administrator signup requires the backend `ADMIN_SIGNUP_CODE`. Passwords must be at least eight characters.
 
 ## What is connected today
 
 - Property discovery, listing creation and edits, and application review use the existing Spring endpoints when available.
-- Theme choice, demo sign-in state, sample chats, notifications, preview listings, and the expense ledger are stored in this browser's `localStorage`.
-- The provided backend does not currently expose account/authentication, chat, notification, expense, or payment endpoints. Social sign-in buttons are preview actions, and Pay rent is a preview action. Do not treat the browser-side role checks as security controls; enforce identity and roles on the server before using real tenant data.
-- The backend `ApplicationController` currently allows only `http://localhost:5173` through CORS. In the backend source, update its `@CrossOrigin` origins to include the exact frontend domains you deploy, for example `@CrossOrigin(origins = {"https://your-app.vercel.app", "https://your-site.onrender.com", "http://localhost:5173"})`. The other backend controllers use `FRONTEND_URL`; make sure that setting matches an allowed domain too, then redeploy the backend.
+- Account registration/sign-in, protected property and application actions, and tenant/landlord messaging use backend APIs. Messages are stored in MySQL; the open Messages page refreshes every five seconds.
+- Theme choice, notifications, preview listings, and the expense ledger are still stored in this browser's `localStorage`. Pay rent remains a preview action.
+- Backend CORS allows local Vite development and Vercel subdomains. If you deploy elsewhere, update `CorsConfig` to add the exact frontend origin and redeploy the backend.
 - Uploaded images are held in browser storage for the preview. The current backend model has no image upload endpoint, so an uploaded data URL is not sent to MySQL.
 
 ## Publish to GitHub
@@ -55,3 +55,4 @@ If your default branch has another name, replace `main` with that branch. If thi
 7. Add the Render frontend URL to the backend CORS allowlist and redeploy the backend.
 
 If Vercel and Render both build the same code, set the same `VITE_API_BASE_URL` value in each host's project settings. Keep database passwords and other backend secrets in the backend service settings; never put them in `VITE_*` variables because those values are public in the browser bundle.
+
